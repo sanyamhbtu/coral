@@ -1,0 +1,66 @@
+name: pagerduty
+description: |
+  Query PagerDuty incidents, services, on-call schedules,
+  and escalation policies as SQL tables. Built for SRE and
+  incident response workflows. JOIN with github.commits and
+  datadog.metrics to find root cause automatically.
+
+backend: http
+base_url: https://api.pagerduty.com
+
+auth:
+  type: header
+  header: Authorization
+  value_template: "Token token={{PAGERDUTY_API_KEY}}"
+
+inputs:
+  - name: PAGERDUTY_API_KEY
+    description: REST API key from Integrations → API Access Keys
+    secret: true
+
+tables:
+  - name: incidents
+    description: Active and historical PagerDuty incidents
+    endpoint: /incidents
+    result_path: incidents
+    paginate:
+      strategy: offset
+      offset_param: offset
+      limit_param: limit
+      page_size: 100
+    columns:
+      - { name: id,           type: Utf8 }
+      - { name: title,        type: Utf8 }
+      - { name: status,       type: Utf8,      description: "triggered|acknowledged|resolved" }
+      - { name: urgency,      type: Utf8,      description: "high|low" }
+      - { name: created_at,   type: Timestamp }
+      - { name: resolved_at,  type: Timestamp }
+      - { name: service_name, type: Utf8 }
+      - { name: assigned_to,  type: Utf8 }
+
+  - name: services
+    description: All PagerDuty services and their current health
+    endpoint: /services
+    result_path: services
+    columns:
+      - { name: id,     type: Utf8 }
+      - { name: name,   type: Utf8 }
+      - { name: status, type: Utf8, description: "active|warning|critical|maintenance|disabled" }
+
+  - name: oncalls
+    description: Who is currently on call per schedule
+    endpoint: /oncalls
+    result_path: oncalls
+    columns:
+      - { name: user_name,     type: Utf8 }
+      - { name: schedule_name, type: Utf8 }
+      - { name: start,         type: Timestamp }
+      - { name: end,           type: Timestamp }
+
+relationships:
+  - from: incidents.created_at
+    to: github.commits.pushed_at
+    hint: "Time-window JOIN: commits in 2h before incident are suspects"
+  - from: incidents.service_name
+    to: datadog.metrics.service
+    hint: "JOIN on service name to find metric spikes"
